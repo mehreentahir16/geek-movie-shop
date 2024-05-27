@@ -52,7 +52,9 @@ server {
     }
 
     location /api/cart/ {
+        add_header X-Cart-Host $CART_HOST;
         proxy_pass http://${CART_HOST}:8080/;
+        access_log /var/log/nginx/cart_access.log;
     }
 
     location /api/shipping/ {

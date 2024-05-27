@@ -1,18 +1,16 @@
+require('dotenv').config();
 const newrelic = require('newrelic');
-
-const mongoClient = require('mongodb').MongoClient;
-const mongoObjectID = require('mongodb').ObjectID;
-const redis = require('redis');
-const bodyParser = require('body-parser');
+const { MongoClient, ObjectId } = require('mongodb');
+const { createClient } = require('redis');
 const express = require('express');
 const pino = require('pino');
 const expPino = require('express-pino-logger');
 
 // MongoDB
-var db;
-var usersCollection;
-var ordersCollection;
-var mongoConnected = false;
+let db;
+let usersCollection;
+let ordersCollection;
+let mongoConnected = false;
 
 const logger = pino({
     level: 'info',
@@ -20,9 +18,7 @@ const logger = pino({
     useLevelLabels: true
 });
 
-const expLogger = expPino({
-    logger: logger
-});
+const expLogger = expPino({ logger });
 
 const app = express();
 
@@ -34,11 +30,11 @@ app.use((req, res, next) => {
     next();
 });
 
-app.use(bodyParser.urlencoded({ extended: true }));
-app.use(bodyParser.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
 
 app.get('/health', (req, res) => {
-    var stat = {
+    const stat = {
         app: 'OK',
         mongo: mongoConnected
     };
@@ -46,35 +42,32 @@ app.get('/health', (req, res) => {
 });
 
 // use REDIS INCR to track anonymous users
-app.get('/uniqueid', (req, res) => {
+app.get('/uniqueid', async (req, res) => {
     req.log.error('Unique ID test');
-    // get number from Redis
-    redisClient.incr('anonymous-counter', (err, r) => {
-        if(!err) {
-            res.json({
-                uuid: 'anonymous-' + r
-            });
-        } else {
-            req.log.error('ERROR', err);
-            res.status(500).send(err);
-        }
-    });
+    try {
+        const r = await redisClient.incr('anonymous-counter');
+        res.json({ uuid: 'anonymous-' + r });
+    } catch (err) {
+        req.log.error('ERROR', err);
+        res.status(500).send(err);
+    }
 });
 
 // check user exists
-app.get('/check/:id', (req, res) => {
+app.get('/check/:id', async (req, res) => {
     newrelic.addCustomAttribute('user_id', req.params.id);
-    if(mongoConnected) {
-        usersCollection.findOne({name: req.params.id}).then((user) => {
-            if(user) {
+    if (mongoConnected) {
+        try {
+            const user = await usersCollection.findOne({ name: req.params.id });
+            if (user) {
                 res.send('OK');
             } else {
                 res.status(404).send('user not found');
             }
-        }).catch((e) => {
+        } catch (e) {
             req.log.error(e);
-            res.send(500).send(e);
-        });
+            res.status(500).send(e);
+        }
     } else {
         req.log.error('database not available');
         res.status(500).send('database not available');
@@ -82,33 +75,33 @@ app.get('/check/:id', (req, res) => {
 });
 
 // return all users for debugging only
-app.get('/users', (req, res) => {
-    if(mongoConnected) {
-        usersCollection.find().toArray().then((users) => {
+app.get('/users', async (req, res) => {
+    if (mongoConnected) {
+        try {
+            const users = await usersCollection.find().toArray();
             res.json(users);
-        }).catch((e) => {
+        } catch (e) {
             req.log.error('ERROR', e);
             res.status(500).send(e);
-        });
+        }
     } else {
         req.log.error('database not available');
         res.status(500).send('database not available');
     }
 });
 
-app.post('/login', (req, res) => {
+app.post('/login', async (req, res) => {
     newrelic.addCustomAttribute('user_id', req.body.name);
     req.log.info('login', req.body);
-    if(req.body.name === undefined || req.body.password === undefined) {
+    if (!req.body.name || !req.body.password) {
         req.log.warn('credentials not complete');
-        res.status(400).send('name or passowrd not supplied');
-    } else if(mongoConnected) {
-        usersCollection.findOne({
-            name: req.body.name,
-        }).then((user) => {
+        res.status(400).send('name or password not supplied');
+    } else if (mongoConnected) {
+        try {
+            const user = await usersCollection.findOne({ name: req.body.name });
             req.log.info('user', user);
-            if(user) {
-                if(user.password == req.body.password) {
+            if (user) {
+                if (user.password === req.body.password) {
                     res.json(user);
                 } else {
                     res.status(404).send('incorrect password');
@@ -116,10 +109,10 @@ app.post('/login', (req, res) => {
             } else {
                 res.status(404).send('name not found');
             }
-        }).catch((e) => {
+        } catch (e) {
             req.log.error('ERROR', e);
             res.status(500).send(e);
-        });
+        }
     } else {
         req.log.error('database not available');
         res.status(500).send('database not available');
@@ -127,112 +120,87 @@ app.post('/login', (req, res) => {
 });
 
 // TODO - validate email address format
-app.post('/register', (req, res) => {
+app.post('/register', async (req, res) => {
     newrelic.addCustomAttribute('user_id', req.body.name);
     req.log.info('register', req.body);
-    if(req.body.name === undefined || req.body.password === undefined || req.body.email === undefined) {
+    if (!req.body.name || !req.body.password || !req.body.email) {
         req.log.warn('insufficient data');
         res.status(400).send('insufficient data');
-    } else if(mongoConnected) {
-        // check if name already exists
-        usersCollection.findOne({name: req.body.name}).then((user) => {
-            if(user) {
+    } else if (mongoConnected) {
+        try {
+            const user = await usersCollection.findOne({ name: req.body.name });
+            if (user) {
                 req.log.warn('user already exists');
                 res.status(400).send('name already exists');
             } else {
-                // create new user
-                usersCollection.insertOne({
+                await usersCollection.insertOne({
                     name: req.body.name,
                     password: req.body.password,
                     email: req.body.email
-                }).then((r) => {
-                    req.log.info('inserted', r.result);
-                    res.send('OK');
-                }).catch((e) => {
-                    req.log.error('ERROR', e);
-                    res.status(500).send(e);
                 });
+                req.log.info('inserted', req.body);
+                res.send('OK');
             }
-        }).catch((e) => {
+        } catch (e) {
             req.log.error('ERROR', e);
             res.status(500).send(e);
-        });
+        }
     } else {
         req.log.error('database not available');
         res.status(500).send('database not available');
     }
 });
 
-app.post('/order/:id', (req, res) => {
+app.post('/order/:id', async (req, res) => {
     newrelic.addCustomAttribute('user_id', req.params.id);
     req.log.info('order', req.body);
-    // only for registered users
-    if(mongoConnected) {
-        usersCollection.findOne({
-            name: req.params.id
-        }).then((user) => {
-            if(user) {
-                // found user record
-                // get orders
-                ordersCollection.findOne({
-                    name: req.params.id
-                }).then((history) => {
-                    if(history) {
-                        var list = history.history;
-                        list.push(req.body);
-                        ordersCollection.updateOne(
-                            { name: req.params.id },
-                            { $set: { history: list }}
-                        ).then((r) => {
-                            res.send('OK');
-                        }).catch((e) => {
-                            req.log.error(e);
-                            res.status(500).send(e);
-                        });
-                    } else {
-                        // no history
-                        ordersCollection.insertOne({
-                            name: req.params.id,
-                            history: [ req.body ]
-                        }).then((r) => {
-                            res.send('OK');
-                        }).catch((e) => {
-                            req.log.error(e);
-                            res.status(500).send(e);
-                        });
-                    }
-                }).catch((e) => {
-                    req.log.error(e);
-                    res.status(500).send(e);
-                });
+    if (mongoConnected) {
+        try {
+            const user = await usersCollection.findOne({ name: req.params.id });
+            if (user) {
+                const history = await ordersCollection.findOne({ name: req.params.id });
+                if (history) {
+                    const list = history.history;
+                    list.push(req.body);
+                    await ordersCollection.updateOne(
+                        { name: req.params.id },
+                        { $set: { history: list } }
+                    );
+                    res.send('OK');
+                } else {
+                    await ordersCollection.insertOne({
+                        name: req.params.id,
+                        history: [req.body]
+                    });
+                    res.send('OK');
+                }
             } else {
                 res.status(404).send('name not found');
             }
-        }).catch((e) => {
+        } catch (e) {
             req.log.error(e);
             res.status(500).send(e);
-        });
+        }
     } else {
         req.log.error('database not available');
         res.status(500).send('database not available');
     }
 });
 
-app.get('/history/:id', (req, res) => {
+app.get('/history/:id', async (req, res) => {
     newrelic.addCustomAttribute('user_id', req.params.id);
-    if(mongoConnected) {
-        ordersCollection.findOne({
-            name: req.params.id
-        }).then((history) => {
-            if(history) {
+    if (mongoConnected) {
+        try {
+            const history = await ordersCollection.findOne({ name: req.params.id });
+            if (history) {
                 res.json(history);
             } else {
                 res.status(404).send('history not found');
             }
-        }).catch((e) => {
+        } catch (e) {
             req.log.error(e);
             res.status(500).send(e);
-        });
+        }
     } else {
         req.log.error('database not available');
         res.status(500).send('database not available');
@@ -240,47 +208,39 @@ app.get('/history/:id', (req, res) => {
 });
 
 // connect to Redis
-var redisClient = redis.createClient({
-    host: process.env.REDIS_HOST || 'redis'
+const redisClient = createClient({
+    url: `redis://${process.env.REDIS_HOST || 'redis'}:6379`
 });
 
 redisClient.on('error', (e) => {
     logger.error('Redis ERROR', e);
 });
-redisClient.on('ready', (r) => {
-    logger.info('Redis READY', r);
+redisClient.on('ready', () => {
+    logger.info('Redis READY');
 });
 
-// set up Mongo
-function mongoConnect() {
-    return new Promise((resolve, reject) => {
-        var mongoHOST = process.env.MONGO_HOST || 'mongodb';
-        var mongoURL = 'mongodb://' + mongoHOST + ':27017/users';
-        logger.info(mongoURL);
-        mongoClient.connect(mongoURL, (error, _db) => {
-            if(error) {
-                reject(error);
-            } else {
-                db = _db;
-                usersCollection = db.collection('users');
-                ordersCollection = db.collection('orders');
-                resolve('connected');
-            }
-        });
-    });
-}
+redisClient.connect().catch(e => logger.error('Redis connection error', e));
 
-function mongoLoop() {
-    mongoConnect().then((r) => {
+// set up Mongo
+async function mongoConnect() {
+    try {
+        const mongoHOST = process.env.MONGO_HOST || 'mongodb';
+        const mongoURL = `mongodb://${mongoHOST}:27017/users`;
+        logger.info(mongoURL);
+        const client = new MongoClient(mongoURL);
+        await client.connect();
+        db = client.db();
+        usersCollection = db.collection('users');
+        ordersCollection = db.collection('orders');
         mongoConnected = true;
         logger.info('MongoDB connected');
-    }).catch((e) => {
-        logger.error('ERROR', e);
-        setTimeout(mongoLoop, 2000);
-    });
+    } catch (error) {
+        logger.error('MongoDB connection error', error);
+        setTimeout(mongoConnect, 2000);
+    }
 }
 
-mongoLoop();
+mongoConnect();
 
 // fire it up!
 const port = process.env.USER_SERVER_PORT || '8080';

@@ -1,8 +1,6 @@
+require('dotenv').config();
 const newrelic = require('newrelic');
-
-const mongoClient = require('mongodb').MongoClient;
-const mongoObjectID = require('mongodb').ObjectID;
-const bodyParser = require('body-parser');
+const { MongoClient, ObjectId } = require('mongodb');
 const express = require('express');
 const pino = require('pino');
 const expPino = require('express-pino-logger');
@@ -12,14 +10,8 @@ const logger = pino({
     prettyPrint: false,
     useLevelLabels: true
 });
-const expLogger = expPino({
-    logger: logger
-});
 
-// MongoDB
-var db;
-var collection;
-var mongoConnected = false;
+const expLogger = expPino({ logger });
 
 const app = express();
 
@@ -31,11 +23,15 @@ app.use((req, res, next) => {
     next();
 });
 
-app.use(bodyParser.urlencoded({ extended: true }));
-app.use(bodyParser.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+
+let db;
+let collection;
+let mongoConnected = false;
 
 app.get('/health', (req, res) => {
-    var stat = {
+    const stat = {
         app: 'OK',
         mongo: mongoConnected
     };
@@ -43,35 +39,37 @@ app.get('/health', (req, res) => {
 });
 
 // all products
-app.get('/products', (req, res) => {
-    if(mongoConnected) {
-        collection.find({}).toArray().then((products) => {
+app.get('/products', async (req, res) => {
+    if (mongoConnected) {
+        try {
+            const products = await collection.find({}).toArray();
             res.json(products);
-        }).catch((e) => {
+        } catch (e) {
             req.log.error('ERROR', e);
             res.status(500).send(e);
-        });
+        }
     } else {
         req.log.error('database not available');
-        res.status(500).send('database not avaiable');
+        res.status(500).send('database not available');
     }
 });
 
 // product by SKU
-app.get('/product/:sku', (req, res) => {
+app.get('/product/:sku', async (req, res) => {
     newrelic.addCustomAttribute('sku', req.params.sku);
-    if(mongoConnected) {
-        collection.findOne({sku: req.params.sku}).then((product) => {
+    if (mongoConnected) {
+        try {
+            const product = await collection.findOne({ sku: req.params.sku });
             req.log.info('product', product);
-            if(product) {
+            if (product) {
                 res.json(product);
             } else {
                 res.status(404).send('SKU not found');
             }
-        }).catch((e) => {
+        } catch (e) {
             req.log.error('ERROR', e);
             res.status(500).send(e);
-        });
+        }
     } else {
         req.log.error('database not available');
         res.status(500).send('database not available');
@@ -79,34 +77,36 @@ app.get('/product/:sku', (req, res) => {
 });
 
 // products in a category
-app.get('/products/:cat', (req, res) => {
+app.get('/products/:cat', async (req, res) => {
     newrelic.addCustomAttribute('category', req.params.cat);
-    if(mongoConnected) {
-        collection.find({ categories: req.params.cat }).sort({ name: 1 }).toArray().then((products) => {
-            if(products) {
+    if (mongoConnected) {
+        try {
+            const products = await collection.find({ categories: req.params.cat }).sort({ name: 1 }).toArray();
+            if (products) {
                 res.json(products);
             } else {
-                res.status(404).send('No products for ' + req.params.cat);
+                res.status(404).send(`No products for ${req.params.cat}`);
             }
-        }).catch((e) => {
+        } catch (e) {
             req.log.error('ERROR', e);
             res.status(500).send(e);
-        });
+        }
     } else {
         req.log.error('database not available');
-        res.status(500).send('database not avaiable');
+        res.status(500).send('database not available');
     }
 });
 
 // all categories
-app.get('/categories', (req, res) => {
-    if(mongoConnected) {
-        collection.distinct('categories').then((categories) => {
+app.get('/categories', async (req, res) => {
+    if (mongoConnected) {
+        try {
+            const categories = await collection.distinct('categories');
             res.json(categories);
-        }).catch((e) => {
+        } catch (e) {
             req.log.error('ERROR', e);
             res.status(500).send(e);
-        });
+        }
     } else {
         req.log.error('database not available');
         res.status(500).send('database not available');
@@ -114,15 +114,16 @@ app.get('/categories', (req, res) => {
 });
 
 // search name and description
-app.get('/search/:text', (req, res) => {
+app.get('/search/:text', async (req, res) => {
     newrelic.addCustomAttribute('searchText', req.params.text);
-    if(mongoConnected) {
-        collection.find({ '$text': { '$search': req.params.text }}).toArray().then((hits) => {
+    if (mongoConnected) {
+        try {
+            const hits = await collection.find({ '$text': { '$search': req.params.text } }).toArray();
             res.json(hits);
-        }).catch((e) => {
+        } catch (e) {
             req.log.error('ERROR', e);
             res.status(500).send(e);
-        });
+        }
     } else {
         req.log.error('database not available');
         res.status(500).send('database not available');
@@ -130,37 +131,26 @@ app.get('/search/:text', (req, res) => {
 });
 
 // set up Mongo
-function mongoConnect() {
-    return new Promise((resolve, reject) => {
-        var mongoHOST = process.env.MONGO_HOST || 'mongodb';
-        var mongoURL = 'mongodb://' + mongoHOST + ':27017/catalogue';
-        mongoClient.connect(mongoURL, (error, _db) => {
-            if(error) {
-                reject(error);
-            } else {
-                db = _db;
-                collection = db.collection('products');
-                resolve('connected');
-            }
-        });
-    });
-}
-// "mongodb://localhost:27017/exampleDb"
-// mongodb connection retry loop
-function mongoLoop() {
-    mongoConnect().then((r) => {
+async function mongoConnect() {
+    try {
+        const mongoHOST = process.env.MONGO_HOST || 'mongodb';
+        const mongoURL = `mongodb://${mongoHOST}:27017/catalogue`;
+        const client = new MongoClient(mongoURL, { useNewUrlParser: true, useUnifiedTopology: true });
+        await client.connect();
+        db = client.db();
+        collection = db.collection('products');
         mongoConnected = true;
         logger.info('MongoDB connected');
-    }).catch((e) => {
-        logger.error('ERROR', e);
-        setTimeout(mongoLoop, 2000);
-    });
+    } catch (error) {
+        logger.error('MongoDB connection error', error);
+        setTimeout(mongoConnect, 2000);
+    }
 }
 
-mongoLoop();
+mongoConnect();
 
 // fire it up!
 const port = process.env.CATALOGUE_SERVER_PORT || '8080';
 app.listen(port, () => {
-    logger.info('Started on port', port);
+    logger.info(`Started on port ${port}`);
 });

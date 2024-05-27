@@ -8,10 +8,6 @@ metadata:
 spec:
   containers:
   - env:
-    - name: NEW_RELIC_BROWSER_APPLICATION_ID
-      value: "$NEW_RELIC_BROWSER_APPLICATION_ID"
-    - name: NEW_RELIC_BROWSER_LICENSE_KEY
-      value: $NEW_RELIC_BROWSER_LICENSE_KEY
     - name: CATALOGUE_HOST
       value: catalogue-$CLUSTER_NAME
     - name: USER_HOST

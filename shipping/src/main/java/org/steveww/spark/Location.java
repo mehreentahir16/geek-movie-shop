@@ -16,7 +16,7 @@ public class Location {
     public double getLongitude() {
         return this.longitude;
     }
-
+    
 
     /**
      * Calculate the distance between this location and the target location.

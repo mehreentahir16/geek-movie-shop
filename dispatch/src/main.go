@@ -1,16 +1,16 @@
 package main
 
 import (
+    "encoding/json"
     "fmt"
     "log"
-    "time"
-    "os"
     "math/rand"
+    "os"
     "strconv"
-    "encoding/json"
+    "time"
 
+    "github.com/newrelic/go-agent/v3/newrelic"
     "github.com/streadway/amqp"
-    "github.com/newrelic/go-agent"
 )
 
 const (
@@ -18,12 +18,12 @@ const (
 )
 
 var (
-    amqpUri string
-    rabbitChan *amqp.Channel
+    amqpUri         string
+    rabbitChan      *amqp.Channel
     rabbitCloseError chan *amqp.Error
-    rabbitReady chan bool
-    errorPercent int
-    app newrelic.Application
+    rabbitReady      chan bool
+    errorPercent     int
+    app             *newrelic.Application
 )
 
 func connectToRabbitMQ(uri string) *amqp.Connection {
@@ -75,7 +75,6 @@ func rabbitConnector(uri string) {
 
 func failOnError(err error, msg string) {
     if err != nil {
-        // log.Fatalf("$s : %s", msg, err)
         panic(fmt.Sprintf("%s : %s", msg, err))
     }
 }
@@ -104,13 +103,21 @@ func main() {
         appName = "dispatch-service"
     }
     licenseKey, ok := os.LookupEnv("NEW_RELIC_LICENSE_KEY")
-    if ok {
-        config := newrelic.NewConfig(appName, licenseKey)
-        config.CrossApplicationTracer.Enabled = false
-        config.DistributedTracer.Enabled = true
-        config.Labels = map[string]string{"service": "dispatch"}
-        app, _ = newrelic.NewApplication(config)
+    if !ok {
+        log.Fatal("New Relic License Key not set")
     }
+
+    var err error
+    app, err = newrelic.NewApplication(
+        newrelic.ConfigAppName(appName),
+        newrelic.ConfigLicense(licenseKey),
+        newrelic.ConfigDistributedTracerEnabled(true),
+        newrelic.ConfigDebugLogger(os.Stdout),
+    )
+    if err != nil {
+        log.Fatal("Error initializing New Relic application:", err)
+    }
+    log.Printf("New Relic application initialized: %s", appName)
 
     // Init amqpUri
     // get host from environment
@@ -142,7 +149,7 @@ func main() {
 
     // MQ ready channel
     rabbitReady = make(chan bool)
- 
+
     go rabbitConnector(amqpUri)
 
     rabbitCloseError <- amqp.ErrClosed
@@ -153,22 +160,20 @@ func main() {
             ready := <-rabbitReady
             log.Printf("Rabbit MQ ready %v\n", ready)
 
-            // create new Transaction
-            txn := app.StartTransaction("/consume/order", nil, nil)
-            defer txn.End()
-            
-
             // subscribe to bound queue
             msgs, err := rabbitChan.Consume("orders", "", true, false, false, false, nil)
             failOnError(err, "Failed to consume")
 
             for d := range msgs {
-                log.Printf("Order %s\n", d.Body)
-                log.Printf("Headers %v\n", d.Headers)
+                // create new Transaction
+                txn := app.StartTransaction("consume/order")
                 userId, orderId := getOrderDetails(d.Body)
                 txn.AddAttribute("user_id", userId)
                 txn.AddAttribute("order_id", orderId)
+                log.Printf("Order %s\n", d.Body)
+                log.Printf("Headers %v\n", d.Headers)
                 processSale()
+                txn.End()
             }
         }
     }()

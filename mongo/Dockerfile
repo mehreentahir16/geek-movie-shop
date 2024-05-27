@@ -1,3 +1,3 @@
-FROM mongo:3.6.1
+FROM mongo:latest
 
 COPY src/* /docker-entrypoint-initdb.d/

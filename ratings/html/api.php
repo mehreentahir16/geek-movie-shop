@@ -1,6 +1,5 @@
 <?php
 require_once 'API.class.php';
-
 use Monolog\Logger;
 
 class RatingsAPI extends API {
@@ -21,18 +20,17 @@ class RatingsAPI extends API {
         $data['method'] = $this->method;
         $data['verb'] = $this->verb;
         $data = array_merge($data, array('args' => $this->args));
-
         return $data;
     }
 
     // ratings/fetch/sku
     protected function fetch() {
-        if($this->method == 'GET' && isset($this->verb) && count($this->args) == 0) {
+        if ($this->method == 'GET' && isset($this->verb) && count($this->args) == 0) {
             $sku = $this->verb;
-            if (extension_loaded('newrelic')) { // Ensure PHP agent is available
-              newrelic_add_custom_parameter('sku', $sku);
+            if (extension_loaded('newrelic')) {
+                newrelic_add_custom_parameter('sku', $sku);
             }
-            if(! $this->_checkSku($sku)) {
+            if (!$this->_checkSku($sku)) {
                 throw new Exception("$sku not found", 404);
             }
             $data = $this->_getRating($sku);
@@ -45,25 +43,23 @@ class RatingsAPI extends API {
 
     // ratings/rate/sku/score
     protected function rate() {
-        if($this->method == 'PUT' && isset($this->verb) && count($this->args) == 1) {
+        if ($this->method == 'PUT' && isset($this->verb) && count($this->args) == 1) {
             $sku = $this->verb;
             $score = intval($this->args[0]);
             $score = min(max(1, $score), 5);
 
-            if (extension_loaded('newrelic')) { // Ensure PHP agent is available
-                newrelic_record_custom_event("SKURating", array("sku"=>$sku, "score"=>$score));
+            if (extension_loaded('newrelic')) {
+                newrelic_record_custom_event("SKURating", array("sku" => $sku, "score" => $score));
             }
 
-            if(! $this->_checkSku($sku)) {
+            if (!$this->_checkSku($sku)) {
                 throw new Exception("$sku not found", 404);
             }
 
             $rating = $this->_getRating($sku);
-            if($rating['avg_rating'] == 0) {
-                // not rated yet
+            if ($rating['avg_rating'] == 0) {
                 $this->_insertRating($sku, $score);
             } else {
-                // iffy maths
                 $newAvg = (($rating['avg_rating'] * $rating['rating_count']) + $score) / ($rating['rating_count'] + 1);
                 $this->_updateRating($sku, $newAvg, $rating['rating_count'] + 1);
             }
@@ -77,16 +73,14 @@ class RatingsAPI extends API {
 
     private function _getRating($sku) {
         $db = $this->_dbConnect();
-        if($db) {
+        if ($db) {
             $stmt = $db->prepare('select avg_rating, rating_count from ratings where sku = ?');
-            if($stmt->execute(array($sku))) {
+            if ($stmt->execute(array($sku))) {
                 $data = $stmt->fetch();
-                if($data) {
-                    // for some reason avg_rating is return as a string
+                if ($data) {
                     $data['avg_rating'] = floatval($data['avg_rating']);
                     return $data;
                 } else {
-                    // nicer to return an empty record than throw 404
                     return array('avg_rating' => 0, 'rating_count' => 0);
                 }
             } else {
@@ -101,9 +95,9 @@ class RatingsAPI extends API {
 
     private function _updateRating($sku, $score, $count) {
         $db = $this->_dbConnect();
-        if($db) {
+        if ($db) {
             $stmt = $db->prepare('update ratings set avg_rating = ?, rating_count = ? where sku = ?');
-            if(! $stmt->execute(array($score, $count, $sku))) {
+            if (!$stmt->execute(array($score, $count, $sku))) {
                 $this->logger->error('failed to update rating');
                 throw new Exception('Failed to update data', 500);
             }
@@ -115,9 +109,9 @@ class RatingsAPI extends API {
 
     private function _insertRating($sku, $score) {
         $db = $this->_dbConnect();
-        if($db) {
+        if ($db) {
             $stmt = $db->prepare('insert into ratings(sku, avg_rating, rating_count) values(?, ?, ?)');
-            if(! $stmt->execute(array($sku, $score, 1))) {
+            if (!$stmt->execute(array($sku, $score, 1))) {
                 $this->logger->error('failed to insert data');
                 throw new Exception('Failed to insert data', 500);
             }
@@ -161,7 +155,7 @@ class RatingsAPI extends API {
         curl_setopt_array($curl, $opt);
 
         $data = curl_exec($curl);
-        if(! $data) {
+        if (!$data) {
             $this->logger->error('failed to connect to catalogue');
             throw new Exception('Failed to connect to catalogue', 500);
         }
@@ -171,18 +165,16 @@ class RatingsAPI extends API {
         curl_close($curl);
 
         return $status == 200;
-
     }
 }
 
-if(!array_key_exists('HTTP_ORIGIN', $_SERVER)) {
+if (!array_key_exists('HTTP_ORIGIN', $_SERVER)) {
     $_SERVER['HTTP_ORIGIN'] = $_SERVER['SERVER_NAME'];
 }
 
 try {
     $API = new RatingsAPI($_REQUEST['request'], $_SERVER['HTTP_ORIGIN']);
     echo $API->processAPI();
-} catch(Exception $e) {
-    echo json_encode(Array('error' => $e->getMessage()));
+} catch (Exception $e) {
+    echo json_encode(array('error' => $e->getMessage()));
 }
-?>

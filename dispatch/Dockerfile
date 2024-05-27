@@ -1,16 +1,17 @@
-FROM golang:1.9.2
+FROM golang:1.20
 
-ENV DEP_URL="https://github.com/golang/dep/releases/download/v0.5.0/dep-linux-amd64"
+# Set the GOPATH environment variable
 ENV GOPATH=/go
 
+# Copy the source code to the container
 COPY src/ /go/src/github.com/newrelic/dispatch
 
+# Set the working directory
 WORKDIR /go/src/github.com/newrelic/dispatch
 
-RUN \
-	curl -fsSL -o /usr/local/bin/dep ${DEP_URL} && \
-	chmod +x /usr/local/bin/dep && \
-	dep ensure && \
-	go build -o bin/gorcv
+# Run go mod tidy to ensure all dependencies are downloaded
+# Run go build to build the application
+RUN go mod tidy && go build -o bin/gorcv main.go
 
-CMD bin/gorcv
+# Set the entry point for the container
+CMD ["bin/gorcv"]

@@ -9,12 +9,13 @@
   "author": "SteveW",
   "license": "Apache-2.0",
   "dependencies": {
-      "body-parser": "^1.18.1",
-      "express": "^4.15.4",
-      "mongodb": "^2.2.33",
-      "pino": "^5.10.8",
+      "body-parser": "^1.20.2",
+      "express": "^4.19.2",
+      "mongodb": "^6.6.2",
+      "pino": "^9.1.0",
       "express-pino-logger": "^4.0.0",
-      "pino-pretty": "^2.5.0",
-      "newrelic": "^*"
+      "pino-pretty": "^11.0.0",
+      "newrelic": "^*",
+      "dotenv": "^16.0.3"
   }
 }
